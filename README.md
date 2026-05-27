@@ -163,6 +163,26 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-mirofish.ps1 -InstallIf
 
 The launcher opens separate backend and frontend windows. If `.env` is missing, it will first copy `.env.example` and remind you to fill in the required API keys.
 
+One-click stop on Windows:
+
+```powershell
+# Option 1: double-click stop-mirofish.bat in the repository root
+
+# Option 2: run the PowerShell stop script from the repository root
+powershell -ExecutionPolicy Bypass -File .\scripts\stop-mirofish.ps1
+```
+
+One-click restart on Windows:
+
+```powershell
+# Option 1: double-click restart-mirofish.bat in the repository root
+
+# Option 2: run the PowerShell restart script from the repository root
+powershell -ExecutionPolicy Bypass -File .\scripts\restart-mirofish.ps1
+```
+
+Add `-DryRun` if you want to preview which processes would be stopped without actually stopping them.
+
 ```bash
 # Start both frontend and backend (run from project root)
 npm run dev

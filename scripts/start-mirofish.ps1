@@ -158,4 +158,4 @@ Write-Host ''
 Write-Host 'MiroFish launch commands are ready.'
 Write-Host "Frontend: http://localhost:$frontendPort"
 Write-Host "Backend:  http://localhost:$backendPort"
-Write-Host 'Close the opened terminal windows to stop the services.'
+Write-Host 'Use stop-mirofish.bat to stop the services, or close the opened terminal windows manually.'

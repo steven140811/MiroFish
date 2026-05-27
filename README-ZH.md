@@ -163,6 +163,26 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-mirofish.ps1 -InstallIf
 
 脚本会分别打开前后端窗口；如果本地没有 `.env`，会先根据 `.env.example` 生成一份模板并提醒你补充 API Key。
 
+Windows 一键停止：
+
+```powershell
+# 方式一：双击仓库根目录的 stop-mirofish.bat
+
+# 方式二：在项目根目录执行 PowerShell 脚本
+powershell -ExecutionPolicy Bypass -File .\scripts\stop-mirofish.ps1
+```
+
+Windows 一键重启：
+
+```powershell
+# 方式一：双击仓库根目录的 restart-mirofish.bat
+
+# 方式二：在项目根目录执行 PowerShell 脚本
+powershell -ExecutionPolicy Bypass -File .\scripts\restart-mirofish.ps1
+```
+
+如果你只想预览会停止哪些进程而不真正执行，可加 `-DryRun`。
+
 ```bash
 # 同时启动前后端（在项目根目录执行）
 npm run dev
