@@ -53,11 +53,13 @@ function Test-PortOccupied {
     }
 }
 
-function Start-ServiceWindow {
+function Start-ServiceProcess {
     param(
         [string]$Title,
         [string]$WorkingDirectory,
         [string]$Command,
+        [string]$StdOutLogPath,
+        [string]$StdErrLogPath,
         [switch]$DryRunMode
     )
 
@@ -70,17 +72,21 @@ function Start-ServiceWindow {
     $launchCommand = "`$Host.UI.RawUI.WindowTitle = '$Title'; Set-Location '$escapedWorkingDirectory'; $Command"
 
     if ($DryRunMode) {
-        Write-Host "DRY RUN => $($shellCommand.Source) -NoExit -ExecutionPolicy Bypass -Command $launchCommand"
+        Write-Host "DRY RUN => $($shellCommand.Source) -WindowStyle Hidden -ExecutionPolicy Bypass -NoProfile -Command $launchCommand"
+        Write-Host "DRY RUN => stdout: $StdOutLogPath"
+        Write-Host "DRY RUN => stderr: $StdErrLogPath"
         return
     }
 
-    Start-Process -FilePath $shellCommand.Source -ArgumentList @(
-        '-NoExit',
+    $process = Start-Process -FilePath $shellCommand.Source -WindowStyle Hidden -PassThru -ArgumentList @(
+        '-NoProfile',
         '-ExecutionPolicy',
         'Bypass',
         '-Command',
         $launchCommand
-    ) | Out-Null
+    ) -RedirectStandardOutput $StdOutLogPath -RedirectStandardError $StdErrLogPath
+
+    Write-Host "$Title started in background (launcher PID: $($process.Id))"
 }
 
 Require-Command node
@@ -151,11 +157,20 @@ if (Test-PortOccupied -Port ([int]$backendPort)) {
 $backendCommand = 'uv run python run.py'
 $frontendCommand = 'npm run dev'
 
-Start-ServiceWindow -Title 'MiroFish Backend' -WorkingDirectory (Join-Path $repoRoot 'backend') -Command $backendCommand -DryRunMode:$DryRun
-Start-ServiceWindow -Title 'MiroFish Frontend' -WorkingDirectory (Join-Path $repoRoot 'frontend') -Command $frontendCommand -DryRunMode:$DryRun
+$logDirectory = Join-Path $repoRoot 'backend\logs'
+New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
+
+$backendStdOutLogPath = Join-Path $logDirectory 'mirofish-backend.stdout.log'
+$backendStdErrLogPath = Join-Path $logDirectory 'mirofish-backend.stderr.log'
+$frontendStdOutLogPath = Join-Path $logDirectory 'mirofish-frontend.stdout.log'
+$frontendStdErrLogPath = Join-Path $logDirectory 'mirofish-frontend.stderr.log'
+
+Start-ServiceProcess -Title 'MiroFish Backend' -WorkingDirectory (Join-Path $repoRoot 'backend') -Command $backendCommand -StdOutLogPath $backendStdOutLogPath -StdErrLogPath $backendStdErrLogPath -DryRunMode:$DryRun
+Start-ServiceProcess -Title 'MiroFish Frontend' -WorkingDirectory (Join-Path $repoRoot 'frontend') -Command $frontendCommand -StdOutLogPath $frontendStdOutLogPath -StdErrLogPath $frontendStdErrLogPath -DryRunMode:$DryRun
 
 Write-Host ''
-Write-Host 'MiroFish launch commands are ready.'
+Write-Host 'MiroFish services are configured for background start.'
 Write-Host "Frontend: http://localhost:$frontendPort"
 Write-Host "Backend:  http://localhost:$backendPort"
-Write-Host 'Use stop-mirofish.bat to stop the services, or close the opened terminal windows manually.'
+Write-Host "Logs:     $logDirectory"
+Write-Host 'Use stop-mirofish.bat to stop the services.'

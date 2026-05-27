@@ -161,7 +161,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-mirofish.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\start-mirofish.ps1 -InstallIfMissing
 ```
 
-脚本会分别打开前后端窗口；如果本地没有 `.env`，会先根据 `.env.example` 生成一份模板并提醒你补充 API Key。
+脚本会以后台方式启动前后端，并把日志写到 `backend/logs/`；如果本地没有 `.env`，会先根据 `.env.example` 生成一份模板并提醒你补充 API Key。
 
 Windows 一键停止：
 

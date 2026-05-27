@@ -161,7 +161,7 @@ If you want the launcher to install missing dependencies automatically, run:
 powershell -ExecutionPolicy Bypass -File .\scripts\start-mirofish.ps1 -InstallIfMissing
 ```
 
-The launcher opens separate backend and frontend windows. If `.env` is missing, it will first copy `.env.example` and remind you to fill in the required API keys.
+The launcher starts backend and frontend in the background and writes logs to `backend/logs/`. If `.env` is missing, it will first copy `.env.example` and remind you to fill in the required API keys.
 
 One-click stop on Windows:
 
