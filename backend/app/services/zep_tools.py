@@ -20,6 +20,7 @@ from ..utils.logger import get_logger
 from ..utils.llm_client import LLMClient
 from ..utils.locale import get_locale, t
 from ..utils.zep_paging import fetch_all_nodes, fetch_all_edges
+from .local_graph_store import LocalGraphStore
 
 logger = get_logger('mirofish.zep_tools')
 
@@ -423,11 +424,16 @@ class ZepToolsService:
     RETRY_DELAY = 2.0
     
     def __init__(self, api_key: Optional[str] = None, llm_client: Optional[LLMClient] = None):
+        self.use_local_backend = Config.use_local_graph_backend()
+        self.store: Optional[LocalGraphStore] = None
         self.api_key = api_key or Config.ZEP_API_KEY
-        if not self.api_key:
+        if self.use_local_backend:
+            self.store = LocalGraphStore(db_path=Config.GRAPH_DB_PATH, llm_client=llm_client)
+            self.client = None
+        elif not self.api_key:
             raise ValueError("ZEP_API_KEY 未配置")
-        
-        self.client = Zep(api_key=self.api_key)
+        else:
+            self.client = Zep(api_key=self.api_key)
         # LLM客户端用于InsightForge生成子问题
         self._llm_client = llm_client
         logger.info(t("console.zepToolsInitialized"))
@@ -484,6 +490,9 @@ class ZepToolsService:
             SearchResult: 搜索结果
         """
         logger.info(t("console.graphSearch", graphId=graph_id, query=query[:50]))
+
+        if self.use_local_backend:
+            return self._local_search(graph_id, query, limit, scope)
         
         # 尝试使用Zep Cloud Search API
         try:
@@ -572,7 +581,7 @@ class ZepToolsService:
         
         # 提取查询关键词（简单分词）
         query_lower = query.lower()
-        keywords = [w.strip() for w in query_lower.replace(',', ' ').replace('，', ' ').split() if len(w.strip()) > 1]
+        keywords = self._build_local_search_terms(query_lower)
         
         def match_score(text: str) -> int:
             """计算文本与查询的匹配分数"""
@@ -595,7 +604,12 @@ class ZepToolsService:
                 all_edges = self.get_all_edges(graph_id)
                 scored_edges = []
                 for edge in all_edges:
-                    score = match_score(edge.fact) + match_score(edge.name)
+                    score = (
+                        match_score(edge.fact)
+                        + match_score(edge.name)
+                        + match_score(edge.source_node_name or "")
+                        + match_score(edge.target_node_name or "")
+                    )
                     if score > 0:
                         scored_edges.append((score, edge))
                 
@@ -646,6 +660,23 @@ class ZepToolsService:
             query=query,
             total_count=len(facts)
         )
+
+    @staticmethod
+    def _build_local_search_terms(query_lower: str) -> List[str]:
+        """构建本地搜索词，兼容英文空格词和中文连续文本。"""
+        import re
+
+        normalized = re.sub(r'[,，。.!?？;；:：\[\]()（）{}"“”‘’/\\|]+', ' ', query_lower)
+        terms = [term.strip() for term in normalized.split() if len(term.strip()) > 1]
+
+        cjk_sequences = re.findall(r'[\u4e00-\u9fff]{2,}', query_lower)
+        for sequence in cjk_sequences:
+            terms.append(sequence)
+            terms.extend(sequence[i:i + 2] for i in range(len(sequence) - 1))
+            if len(sequence) >= 3:
+                terms.extend(sequence[i:i + 3] for i in range(len(sequence) - 2))
+
+        return list(dict.fromkeys(terms))
     
     def get_all_nodes(self, graph_id: str) -> List[NodeInfo]:
         """
@@ -658,6 +689,21 @@ class ZepToolsService:
             节点列表
         """
         logger.info(t("console.fetchingAllNodes", graphId=graph_id))
+
+        if self.use_local_backend:
+            assert self.store is not None
+            result = [
+                NodeInfo(
+                    uuid=node['uuid'],
+                    name=node['name'],
+                    labels=node['labels'],
+                    summary=node['summary'],
+                    attributes=node['attributes'],
+                )
+                for node in self.store.get_all_nodes(graph_id)
+            ]
+            logger.info(t("console.fetchedNodes", count=len(result)))
+            return result
 
         nodes = fetch_all_nodes(self.client, graph_id)
 
@@ -687,6 +733,29 @@ class ZepToolsService:
             边列表（包含created_at, valid_at, invalid_at, expired_at）
         """
         logger.info(t("console.fetchingAllEdges", graphId=graph_id))
+
+        if self.use_local_backend:
+            assert self.store is not None
+            result = []
+            for edge in self.store.get_all_edges(graph_id):
+                edge_info = EdgeInfo(
+                    uuid=edge['uuid'],
+                    name=edge['name'],
+                    fact=edge['fact'],
+                    source_node_uuid=edge['source_node_uuid'],
+                    target_node_uuid=edge['target_node_uuid'],
+                    source_node_name=edge.get('source_node_name'),
+                    target_node_name=edge.get('target_node_name'),
+                )
+                if include_temporal:
+                    edge_info.created_at = edge.get('created_at')
+                    edge_info.valid_at = edge.get('valid_at')
+                    edge_info.invalid_at = edge.get('invalid_at')
+                    edge_info.expired_at = edge.get('expired_at')
+                result.append(edge_info)
+
+            logger.info(t("console.fetchedEdges", count=len(result)))
+            return result
 
         edges = fetch_all_edges(self.client, graph_id)
 
@@ -724,6 +793,19 @@ class ZepToolsService:
             节点信息或None
         """
         logger.info(t("console.fetchingNodeDetail", uuid=node_uuid[:8]))
+
+        if self.use_local_backend:
+            assert self.store is not None
+            node = self.store.get_node(node_uuid)
+            if not node:
+                return None
+            return NodeInfo(
+                uuid=node['uuid'],
+                name=node['name'],
+                labels=node['labels'],
+                summary=node['summary'],
+                attributes=node['attributes'],
+            )
         
         try:
             node = self._call_with_retry(

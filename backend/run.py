@@ -32,6 +32,11 @@ def main():
             print(f"  - {err}")
         print("\n请检查 .env 文件中的配置")
         sys.exit(1)
+
+    if Config.use_local_graph_backend():
+        print(f"信息: 使用本地图谱后端，数据库路径: {Config.GRAPH_DB_PATH}")
+    elif not Config.ZEP_API_KEY:
+        print("警告: ZEP_API_KEY 未配置，图谱构建、实体读取和报告深度分析等依赖 Zep 的能力将不可用。")
     
     # 创建应用
     app = create_app()

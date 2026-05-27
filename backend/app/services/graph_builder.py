@@ -18,6 +18,7 @@ from ..models.task import TaskManager, TaskStatus
 from ..utils.zep_paging import fetch_all_nodes, fetch_all_edges
 from .text_processor import TextProcessor
 from ..utils.locale import t, get_locale, set_locale
+from .local_graph_store import LocalGraphStore
 
 
 @dataclass
@@ -44,11 +45,15 @@ class GraphBuilderService:
     """
     
     def __init__(self, api_key: Optional[str] = None):
+        self.use_local_backend = Config.use_local_graph_backend()
+        self.store: Optional[LocalGraphStore] = None
         self.api_key = api_key or Config.ZEP_API_KEY
-        if not self.api_key:
+        if self.use_local_backend:
+            self.store = LocalGraphStore(db_path=Config.GRAPH_DB_PATH)
+        elif not self.api_key:
             raise ValueError("ZEP_API_KEY 未配置")
-        
-        self.client = Zep(api_key=self.api_key)
+
+        self.client = None if self.use_local_backend else Zep(api_key=self.api_key)
         self.task_manager = TaskManager()
     
     def build_graph_async(
@@ -193,7 +198,16 @@ class GraphBuilderService:
     def create_graph(self, name: str) -> str:
         """创建Zep图谱（公开方法）"""
         graph_id = f"mirofish_{uuid.uuid4().hex[:16]}"
-        
+
+        if self.use_local_backend:
+            assert self.store is not None
+            self.store.create_graph(
+                graph_id=graph_id,
+                name=name,
+                description="MiroFish Local Social Simulation Graph"
+            )
+            return graph_id
+
         self.client.graph.create(
             graph_id=graph_id,
             name=name,
@@ -204,6 +218,11 @@ class GraphBuilderService:
     
     def set_ontology(self, graph_id: str, ontology: Dict[str, Any]):
         """设置图谱本体（公开方法）"""
+        if self.use_local_backend:
+            assert self.store is not None
+            self.store.set_ontology(graph_id, ontology)
+            return
+
         import warnings
         from typing import Optional
         from pydantic import Field
@@ -299,6 +318,19 @@ class GraphBuilderService:
         progress_callback: Optional[Callable] = None
     ) -> List[str]:
         """分批添加文本到图谱，返回所有 episode 的 uuid 列表"""
+        if self.use_local_backend:
+            assert self.store is not None
+            episode_uuids = []
+            total_chunks = len(chunks)
+            for i, chunk in enumerate(chunks, start=1):
+                if progress_callback:
+                    progress_callback(
+                        t('progress.sendingBatch', current=i, total=total_chunks, chunks=1),
+                        i / total_chunks if total_chunks else 1,
+                    )
+                episode_uuids.append(self.store.process_text_chunk(graph_id, chunk))
+            return episode_uuids
+
         episode_uuids = []
         total_chunks = len(chunks)
         
@@ -351,6 +383,11 @@ class GraphBuilderService:
         timeout: int = 600
     ):
         """等待所有 episode 处理完成（通过查询每个 episode 的 processed 状态）"""
+        if self.use_local_backend:
+            if progress_callback:
+                progress_callback(t('progress.processingComplete', completed=len(episode_uuids), total=len(episode_uuids)), 1.0)
+            return
+
         if not episode_uuids:
             if progress_callback:
                 progress_callback(t('progress.noEpisodesWait'), 1.0)
@@ -402,6 +439,16 @@ class GraphBuilderService:
     
     def _get_graph_info(self, graph_id: str) -> GraphInfo:
         """获取图谱信息"""
+        if self.use_local_backend:
+            assert self.store is not None
+            graph_info = self.store.get_graph_info(graph_id)
+            return GraphInfo(
+                graph_id=graph_info['graph_id'],
+                node_count=graph_info['node_count'],
+                edge_count=graph_info['edge_count'],
+                entity_types=graph_info['entity_types'],
+            )
+
         # 获取节点（分页）
         nodes = fetch_all_nodes(self.client, graph_id)
 
@@ -433,6 +480,10 @@ class GraphBuilderService:
         Returns:
             包含nodes和edges的字典，包括时间信息、属性等详细数据
         """
+        if self.use_local_backend:
+            assert self.store is not None
+            return self.store.get_graph_data(graph_id)
+
         nodes = fetch_all_nodes(self.client, graph_id)
         edges = fetch_all_edges(self.client, graph_id)
 
@@ -502,5 +553,9 @@ class GraphBuilderService:
     
     def delete_graph(self, graph_id: str):
         """删除图谱"""
+        if self.use_local_backend:
+            assert self.store is not None
+            self.store.delete_graph(graph_id)
+            return
         self.client.graph.delete(graph_id=graph_id)
 

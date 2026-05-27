@@ -17,6 +17,7 @@ from zep_cloud.client import Zep
 from ..config import Config
 from ..utils.logger import get_logger
 from ..utils.locale import get_locale, set_locale
+from .local_graph_store import LocalGraphStore
 
 logger = get_logger('mirofish.zep_graph_memory_updater')
 
@@ -238,12 +239,17 @@ class ZepGraphMemoryUpdater:
             api_key: Zep API Key（可选，默认从配置读取）
         """
         self.graph_id = graph_id
+        self.use_local_backend = Config.use_local_graph_backend()
+        self.store: Optional[LocalGraphStore] = None
         self.api_key = api_key or Config.ZEP_API_KEY
-        
-        if not self.api_key:
+
+        if self.use_local_backend:
+            self.store = LocalGraphStore(db_path=Config.GRAPH_DB_PATH)
+            self.client = None
+        elif not self.api_key:
             raise ValueError("ZEP_API_KEY未配置")
-        
-        self.client = Zep(api_key=self.api_key)
+        else:
+            self.client = Zep(api_key=self.api_key)
         
         # 活动队列
         self._activity_queue: Queue = Queue()
@@ -266,7 +272,8 @@ class ZepGraphMemoryUpdater:
         self._failed_count = 0      # 发送失败的批次数
         self._skipped_count = 0     # 被过滤跳过的活动数（DO_NOTHING）
         
-        logger.info(f"ZepGraphMemoryUpdater 初始化完成: graph_id={graph_id}, batch_size={self.BATCH_SIZE}")
+        backend_name = 'LocalGraphStore' if self.use_local_backend else 'Zep'
+        logger.info(f"ZepGraphMemoryUpdater 初始化完成: graph_id={graph_id}, backend={backend_name}, batch_size={self.BATCH_SIZE}")
     
     def _get_platform_display_name(self, platform: str) -> str:
         """获取平台的显示名称"""
@@ -403,6 +410,10 @@ class ZepGraphMemoryUpdater:
         """
         if not activities:
             return
+
+        if self.use_local_backend:
+            self._send_batch_activities_local(activities, platform)
+            return
         
         # 将多条活动合并为一条文本，用换行分隔
         episode_texts = [activity.to_episode_text() for activity in activities]
@@ -431,6 +442,42 @@ class ZepGraphMemoryUpdater:
                 else:
                     logger.error(f"批量发送到Zep失败，已重试{self.MAX_RETRIES}次: {e}")
                     self._failed_count += 1
+
+    def _send_batch_activities_local(self, activities: List[AgentActivity], platform: str):
+        """将模拟活动写入本地 SQLite 图谱。"""
+        assert self.store is not None
+
+        try:
+            for index, activity in enumerate(activities, start=1):
+                fact = activity.to_episode_text()
+                activity_name = (
+                    f"{self._get_platform_display_name(platform)} "
+                    f"Round {activity.round_num} {activity.action_type} #{index}"
+                )
+                self.store.add_fact(
+                    graph_id=self.graph_id,
+                    source_name=activity.agent_name or f"Agent {activity.agent_id}",
+                    source_type='Agent',
+                    target_name=activity_name,
+                    target_type='Activity',
+                    relation_name='PERFORMED_ACTION',
+                    fact=fact,
+                    attributes={
+                        'platform': activity.platform,
+                        'agent_id': activity.agent_id,
+                        'action_type': activity.action_type,
+                        'round': activity.round_num,
+                        'timestamp': activity.timestamp,
+                    },
+                )
+
+            self._total_sent += 1
+            self._total_items_sent += len(activities)
+            display_name = self._get_platform_display_name(platform)
+            logger.info(f"成功批量写入 {len(activities)} 条{display_name}活动到本地图谱 {self.graph_id}")
+        except Exception as e:
+            logger.error(f"批量写入本地图谱失败: {e}")
+            self._failed_count += 1
     
     def _flush_remaining(self):
         """发送队列和缓冲区中剩余的活动"""
@@ -464,6 +511,7 @@ class ZepGraphMemoryUpdater:
         
         return {
             "graph_id": self.graph_id,
+            "backend": "local" if self.use_local_backend else "zep",
             "batch_size": self.BATCH_SIZE,
             "total_activities": self._total_activities,  # 添加到队列的活动总数
             "batches_sent": self._total_sent,            # 成功发送的批次数

@@ -146,13 +146,31 @@ npm run setup:backend
 
 #### 3. 启动服务
 
+Windows 一键启动：
+
+```powershell
+# 方式一：双击仓库根目录的 start-mirofish.bat
+
+# 方式二：在项目根目录执行 PowerShell 脚本
+powershell -ExecutionPolicy Bypass -File .\scripts\start-mirofish.ps1
+```
+
+如果你希望脚本在检测到缺失依赖时自动安装，可执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start-mirofish.ps1 -InstallIfMissing
+```
+
+脚本会分别打开前后端窗口；如果本地没有 `.env`，会先根据 `.env.example` 生成一份模板并提醒你补充 API Key。
+
 ```bash
 # 同时启动前后端（在项目根目录执行）
 npm run dev
 ```
 
 **服务地址：**
-- 前端：`http://localhost:3000`
+
+- 前端：`http://localhost:3001`
 - 后端 API：`http://localhost:5001`
 
 **单独启动：**
@@ -172,7 +190,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-默认会读取根目录下的 `.env`，并映射端口 `3000（前端）/5001（后端）`
+默认会读取根目录下的 `.env`，并映射端口 `3001（前端）/5001（后端）`
 
 > 在 `docker-compose.yml` 中已通过注释提供加速镜像地址，可按需替换
 

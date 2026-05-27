@@ -146,13 +146,31 @@ npm run setup:backend
 
 #### 3. Start Services
 
+One-click startup on Windows:
+
+```powershell
+# Option 1: double-click start-mirofish.bat in the repository root
+
+# Option 2: run the PowerShell launcher from the repository root
+powershell -ExecutionPolicy Bypass -File .\scripts\start-mirofish.ps1
+```
+
+If you want the launcher to install missing dependencies automatically, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start-mirofish.ps1 -InstallIfMissing
+```
+
+The launcher opens separate backend and frontend windows. If `.env` is missing, it will first copy `.env.example` and remind you to fill in the required API keys.
+
 ```bash
 # Start both frontend and backend (run from project root)
 npm run dev
 ```
 
 **Service URLs:**
-- Frontend: `http://localhost:3000`
+
+- Frontend: `http://localhost:3001`
 - Backend API: `http://localhost:5001`
 
 **Start Individually:**
@@ -172,7 +190,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Reads `.env` from root directory by default, maps ports `3000 (frontend) / 5001 (backend)`
+Reads `.env` from root directory by default, maps ports `3001 (frontend) / 5001 (backend)`
 
 > Mirror address for faster pulling is provided as comments in `docker-compose.yml`, replace if needed.
 

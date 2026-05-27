@@ -62,7 +62,20 @@ class LLMClient:
             kwargs["response_format"] = response_format
         
         response = self.client.chat.completions.create(**kwargs)
-        content = response.choices[0].message.content
+        message = response.choices[0].message
+        content = message.content
+
+        if not isinstance(content, str):
+            reasoning = getattr(message, 'reasoning', None)
+            if isinstance(reasoning, str) and reasoning.strip():
+                raise ValueError(
+                    f"模型 {self.model} 未在 message.content 返回文本，而是仅返回 reasoning 字段；"
+                    "当前项目请改用兼容标准 OpenAI chat.completions 文本输出的模型。"
+                )
+            raise ValueError(
+                f"模型 {self.model} 未返回可解析的文本内容，请检查网关兼容性或更换模型。"
+            )
+
         # 部分模型（如MiniMax M2.5）会在content中包含<think>思考内容，需要移除
         content = re.sub(r'<think>[\s\S]*?</think>', '', content).strip()
         return content

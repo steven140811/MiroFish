@@ -22,6 +22,7 @@ from ..config import Config
 from ..utils.logger import get_logger
 from ..utils.locale import get_language_instruction, get_locale, set_locale, t
 from .zep_entity_reader import EntityNode, ZepEntityReader
+from .zep_tools import ZepToolsService
 
 logger = get_logger('mirofish.oasis_profile')
 
@@ -199,11 +200,15 @@ class OasisProfileGenerator:
         )
         
         # Zep客户端用于检索丰富上下文
+        self.use_local_graph_backend = Config.use_local_graph_backend()
         self.zep_api_key = zep_api_key or Config.ZEP_API_KEY
         self.zep_client = None
+        self.graph_tools: Optional[ZepToolsService] = None
         self.graph_id = graph_id
-        
-        if self.zep_api_key:
+
+        if self.use_local_graph_backend and self.graph_id:
+            self.graph_tools = ZepToolsService()
+        elif self.zep_api_key:
             try:
                 self.zep_client = Zep(api_key=self.zep_api_key)
             except Exception as e:
@@ -297,6 +302,9 @@ class OasisProfileGenerator:
             包含facts, node_summaries, context的字典
         """
         import concurrent.futures
+
+        if self.use_local_graph_backend:
+            return self._search_local_graph_for_entity(entity)
         
         if not self.zep_client:
             return {"facts": [], "node_summaries": [], "context": ""}
@@ -410,6 +418,47 @@ class OasisProfileGenerator:
             logger.warning(f"Zep检索失败 ({entity_name}): {e}")
         
         return results
+
+    def _search_local_graph_for_entity(self, entity: EntityNode) -> Dict[str, Any]:
+        """使用本地图谱检索实体相关上下文。"""
+        results = {
+            "facts": [],
+            "node_summaries": [],
+            "context": ""
+        }
+        if not self.graph_id or not self.graph_tools:
+            return results
+
+        entity_name = entity.name
+        try:
+            search_result = self.graph_tools.search_graph(
+                graph_id=self.graph_id,
+                query=t('progress.zepSearchQuery', name=entity_name),
+                limit=30,
+                scope='both'
+            )
+            results["facts"] = search_result.facts[:30]
+            summaries = []
+            for node in search_result.nodes:
+                name = node.get('name', '')
+                summary = node.get('summary', '')
+                if summary:
+                    summaries.append(summary)
+                elif name and name != entity_name:
+                    summaries.append(f"相关实体: {name}")
+            results["node_summaries"] = summaries[:20]
+
+            context_parts = []
+            if results["facts"]:
+                context_parts.append("事实信息:\n" + "\n".join(f"- {fact}" for fact in results["facts"][:20]))
+            if results["node_summaries"]:
+                context_parts.append("相关实体:\n" + "\n".join(f"- {summary}" for summary in results["node_summaries"][:10]))
+            results["context"] = "\n\n".join(context_parts)
+            logger.info(f"本地图谱检索完成: {entity_name}, 获取 {len(results['facts'])} 条事实, {len(results['node_summaries'])} 个相关节点")
+        except Exception as e:
+            logger.warning(f"本地图谱检索失败 ({entity_name}): {e}")
+
+        return results
     
     def _build_entity_context(self, entity: EntityNode) -> str:
         """
@@ -472,17 +521,17 @@ class OasisProfileGenerator:
             if related_info:
                 context_parts.append("### 关联实体信息\n" + "\n".join(related_info))
         
-        # 4. 使用Zep混合检索获取更丰富的信息
+        # 4. 使用图谱检索获取更丰富的信息
         zep_results = self._search_zep_for_entity(entity)
         
         if zep_results.get("facts"):
             # 去重：排除已存在的事实
             new_facts = [f for f in zep_results["facts"] if f not in existing_facts]
             if new_facts:
-                context_parts.append("### Zep检索到的事实信息\n" + "\n".join(f"- {f}" for f in new_facts[:15]))
+                context_parts.append("### 图谱检索到的事实信息\n" + "\n".join(f"- {f}" for f in new_facts[:15]))
         
         if zep_results.get("node_summaries"):
-            context_parts.append("### Zep检索到的相关节点\n" + "\n".join(f"- {s}" for s in zep_results["node_summaries"][:10]))
+            context_parts.append("### 图谱检索到的相关节点\n" + "\n".join(f"- {s}" for s in zep_results["node_summaries"][:10]))
         
         return "\n\n".join(context_parts)
     
